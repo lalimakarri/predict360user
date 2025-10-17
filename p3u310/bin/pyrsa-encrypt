@@ -1,0 +1,7 @@
+#!/Users/meghanalammata/CS4485_User-Based_FOV_Entropy_in_360_Video/external/predict360user/p3u310/bin/python3.10
+import sys
+from rsa.cli import encrypt
+if __name__ == '__main__':
+    if sys.argv[0].endswith('.exe'):
+        sys.argv[0] = sys.argv[0][:-4]
+    sys.exit(encrypt())

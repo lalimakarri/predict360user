@@ -1,9 +1,10 @@
 import logging
-
+import numpy as np
 from omegaconf import OmegaConf as oc
 
 import predict360user as p3u
 import wandb
+from predict360user.utils.math360 import mean_angular_error
 
 log = logging.getLogger()
 
@@ -37,7 +38,24 @@ def run(cfg: p3u.RunConfig, **kwargs) -> None:
     model.fit(df)
 
     # evaluate model
-    model.evaluate(df)
+    results = model.evaluate(df)
+
+    # Compute Mean Angular Error (MAE)
+    try:
+        y_true = results.get("y_true") if isinstance(results, dict) else None
+        y_pred = results.get("y_pred") if isinstance(results, dict) else None
+
+        if y_true is not None and y_pred is not None:
+            y_true_np = np.array(y_true)
+            y_pred_np = np.array(y_pred)
+            mae = mean_angular_error(y_true_np, y_pred_np)
+            print(f"Mean Angular Error (degrees): {mae:.2f}")
+            wandb.log({"mean_angular_error_deg": mae})
+        else:
+            print("Skipped MAE: y_true/y_pred not returned from model.evaluate()")
+
+    except Exception as e:
+        print(f"Could not compute MAE: {e}")
 
     # finish run
     wandb.finish()
@@ -55,6 +73,5 @@ if __name__ == "__main__":
         try:
             run(CFG)
         except:
-            log.info(f"==> rerun falied {wandb.run.id} ")
-            run(CFG, resume="must", id=wandb.run.id) # resume using same id
-
+            log.info(f"==> rerun failed {wandb.run.id}")
+            run(CFG, resume="must", id=wandb.run.id)

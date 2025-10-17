@@ -281,3 +281,25 @@ def interpolate_quaternions(
     times[-1] = min(orig_times[-1], times[-1])
     interp_rots = slerp(times)
     return np.concatenate((times[:, np.newaxis], interp_rots.as_quat(True)), axis=1)
+
+
+def mean_angular_error(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """
+    Compute mean angular error (in degrees) between true and predicted 3D gaze vectors.
+    Each input is expected to be an Nx3 array of (x, y, z) direction vectors.
+    """
+    assert y_true.shape == y_pred.shape, "y_true and y_pred must have the same shape"
+    assert y_true.shape[1] == 3, "Vectors must be 3D"
+
+    # Normalize to ensure unit vectors
+    y_true = y_true / np.linalg.norm(y_true, axis=1, keepdims=True)
+    y_pred = y_pred / np.linalg.norm(y_pred, axis=1, keepdims=True)
+
+    # Compute cosine similarity and clamp to [-1, 1] to prevent NaNs
+    cos_sim = np.sum(y_true * y_pred, axis=1)
+    cos_sim = np.clip(cos_sim, -1.0, 1.0)
+
+    # Convert to angular distance in degrees
+    angles = np.degrees(np.arccos(cos_sim))
+    return float(np.mean(angles))
+
