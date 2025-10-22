@@ -12,7 +12,7 @@ from keras.layers import LSTM, Dense, Input, Lambda
 from sklearn.utils.validation import check_is_fitted
 from tensorflow import keras
 from wandb.keras import WandbCallback
-from tensorflow.keras.optimizers.legacy import Adam  # ✅ Faster on M1/M2 GPUs
+from tensorflow.keras.optimizers.legacy import Adam  
 
 import wandb
 from predict360user.base_model import BaseModel, batch_generator_fn
@@ -25,8 +25,7 @@ from predict360user.utils.math360 import (
 
 log = logging.getLogger()
 
-
-# --- Delta Angle Helper ------------------------------------------------------
+# Delta Angle Helper 
 def delta_angle_from_ori_mag_dir(values):
     orientation = values[0]
     magnitudes = values[1] / 2.0
@@ -59,8 +58,7 @@ def delta_angle_from_ori_mag_dir(values):
     )
     return tf.concat([yaw_pred, pitch_pred], -1)
 
-
-# --- Coordinate Conversion Utilities ----------------------------------------
+# Coordinate Conversion Utilities 
 def batch_cartesian_to_normalized_eulerian(positions_in_batch: np.ndarray) -> np.ndarray:
     eulerian_batch = [
         [cartesian_to_eulerian(pos[0], pos[1], pos[2]) for pos in batch]
@@ -68,7 +66,6 @@ def batch_cartesian_to_normalized_eulerian(positions_in_batch: np.ndarray) -> np
     ]
     eulerian_batch = np.array(eulerian_batch) / np.array([2 * np.pi, np.pi])
     return eulerian_batch
-
 
 def batch_normalized_eulerian_to_cartesian(positions_in_batch: np.ndarray) -> np.ndarray:
     positions_in_batch = positions_in_batch * np.array([2 * np.pi, np.pi])
@@ -78,8 +75,7 @@ def batch_normalized_eulerian_to_cartesian(positions_in_batch: np.ndarray) -> np
     ]
     return cartesian_batch
 
-
-# --- Model Definition --------------------------------------------------------
+# Model Definition
 class PosOnly(BaseModel):
     def __init__(self, cfg: RunConfig) -> None:
         self.cfg = cfg
@@ -114,7 +110,7 @@ class PosOnly(BaseModel):
         model.compile(optimizer=model_optimizer, loss=metric_orth_dist_eulerian)
         return model
 
-    # --- Training ------------------------------------------------------------
+    # Training 
     def fit(self, df: pd.DataFrame) -> BaseModel:
         log.info("fit ...")
 
@@ -164,8 +160,8 @@ class PosOnly(BaseModel):
         )
         self.is_fitted_ = True
         return self
-
-    # --- Prediction ----------------------------------------------------------
+    
+        # Prediction
     def predict(self, df: pd.DataFrame) -> Sequence:
         log.info("predict ...")
         check_is_fitted(self)
@@ -178,8 +174,10 @@ class PosOnly(BaseModel):
         pred = self.model.predict(predict_data, verbose=2)
         return batch_normalized_eulerian_to_cartesian(pred)
 
-    # --- Evaluation ----------------------------------------------------------
+
+    # Evaluation with visualization 
     def evaluate(self, df: pd.DataFrame):
+        import matplotlib.pyplot as plt
         log.info("evaluate ...")
         check_is_fitted(self)
 
@@ -197,19 +195,41 @@ class PosOnly(BaseModel):
         pred_cartesian = np.array(batch_normalized_eulerian_to_cartesian(pred_outputs))
         true_cartesian = np.array(true_outputs)
 
-        # Mean Angular Error
-        distances = np.array([
-            np.mean([
-                np.arccos(np.clip(np.dot(a / np.linalg.norm(a), b / np.linalg.norm(b)), -1.0, 1.0))
+        # Compute per-sample angular error 
+        errors = []
+        for true_seq, pred_seq in zip(true_cartesian, pred_cartesian):
+            seq_errors = [
+                np.degrees(
+                    np.arccos(
+                        np.clip(np.dot(a / np.linalg.norm(a), b / np.linalg.norm(b)), -1.0, 1.0)
+                    )
+                )
                 for a, b in zip(true_seq, pred_seq)
-            ])
-            for true_seq, pred_seq in zip(true_cartesian, pred_cartesian)
-        ])
-        mean_err = np.degrees(np.mean(distances))
+            ]
+            errors.append(np.mean(seq_errors))
+
+        errors = np.array(errors)
+        mean_err = np.mean(errors)
         wandb.log({"test_mean_angular_error_deg": mean_err})
         print(f"Mean Angular Error (degrees): {mean_err:.2f}")
 
-        # --- Visualizations ---
+        #  Plot angular error curve 
+        plt.figure(figsize=(10, 5))
+        plt.plot(errors, label="Angular Error per Sample", color="royalblue")
+        plt.axhline(mean_err, color="red", linestyle="--", label=f"Mean = {mean_err:.2f}°")
+        plt.xlabel("Sample Index")
+        plt.ylabel("Angular Error (degrees)")
+        plt.title("Per-Sample Mean Angular Error")
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig("mean_angular_error_curve.png", dpi=200)
+        plt.close()
+        print("📊 Saved plot: mean_angular_error_curve.png")
+
+        wandb.log({"mean_angular_error_curve": wandb.Image("mean_angular_error_curve.png")})
+
+        # Heatmap visualizations 
         flat_path, globe_true, globe_pred = spherical_heatmap(true_cartesian, pred_cartesian)
         try:
             wandb.log({
@@ -222,12 +242,12 @@ class PosOnly(BaseModel):
 
         return {
             "test_mean_angular_error_deg": mean_err,
+            "angular_errors": errors,
             "y_true": true_cartesian,
             "y_pred": pred_cartesian
         }
 
-
-# --- Heatmap Visualization (2D + 3D Globe) ----------------------------------
+# Heatmap Visualization 
 import matplotlib.pyplot as plt
 from scipy.stats import gaussian_kde
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
@@ -290,8 +310,8 @@ def spherical_heatmap(y_true, y_pred, save_prefix="spherical_heatmap"):
     plot_spherical(true_density, "True Gaze (3D Sphere)", globe_true, "viridis")
     plot_spherical(pred_density, "Predicted Gaze (3D Sphere)", globe_pred, "plasma")
 
-    print(f"🌍 Saved equirectangular heatmap: {flat_path}")
-    print(f"🪐 Saved 3D true gaze globe: {globe_true}")
-    print(f"🪐 Saved 3D predicted gaze globe: {globe_pred}")
+    print(f"Saved equirectangular heatmap: {flat_path}")
+    print(f"Saved 3D true gaze globe: {globe_true}")
+    print(f"Saved 3D predicted gaze globe: {globe_pred}")
 
     return flat_path, globe_true, globe_pred
